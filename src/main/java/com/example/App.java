@@ -28,12 +28,16 @@ public class App {
         String YELLOW = "\u001B[33m";
 
         Scanner scanner = new Scanner(System.in);
+        System.out.print("Exchange Ticker: ");
+        String stock_exchange = scanner.nextLine().toUpperCase();
         System.out.print("Stock Ticker: ");
         String stock_ticker = scanner.nextLine().toUpperCase();
+        System.out.print("Region Lock? (y/n): ");
+        String region_lock = scanner.nextLine().toUpperCase();
         scanner.close();
 
         try{
-            Document news_rss = Jsoup.connect("https://news.google.com/rss/search?q=" + "News+Stock+" + stock_ticker).get();
+            Document news_rss = Jsoup.connect("https://news.google.com/rss/search?q=" + "News+Stock+" + stock_exchange + ":" + stock_ticker).get();
             Elements news_item = news_rss.select("item");
             int count = 0;
 
@@ -55,10 +59,10 @@ public class App {
         catch (Exception e) {
             System.out.println(e);
         } 
-        pe_analysis(stock_ticker);
+        pe_analysis(stock_ticker,stock_exchange, region_lock);
 
     }
-    static void pe_analysis(String stock_ticker) throws IOException {
+    static void pe_analysis(String stock_ticker, String stock_exchange, String region_lock) throws IOException {
         String RESET = "\u001B[0m";
         String RED = "\u001B[31m";
         String GREEN = "\u001B[32m";
@@ -68,49 +72,28 @@ public class App {
         System.out.println(YELLOW + "Analyzing and Comparing P/E..." + RESET);
 
         try {
-            HttpClient client = HttpClient.newHttpClient();
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create("https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol?symbols="+ stock_ticker +"&requestMethod=itv&noform=1&partnerId=2&fund=1&exthrs=1&output=json&events=1")).build();
-            HttpResponse<String> response = client.send(request,HttpResponse.BodyHandlers.ofString());
-
-            JsonObject json = JsonParser.parseString(response.body()).getAsJsonObject();
-            // Step 1: Get the FormattedQuoteResult object
-            JsonObject formattedQuoteResult = json.getAsJsonObject("FormattedQuoteResult");
-
-            // Step 2: Get the FormattedQuote array
-            JsonArray formattedQuoteArray = formattedQuoteResult.getAsJsonArray("FormattedQuote");
-
-            // Step 3: Get the first object inside the array
-            JsonObject firstQuote = formattedQuoteArray.get(0).getAsJsonObject();
-
-            String price = firstQuote.get("last").getAsString();
-            String exchange = firstQuote.get("exchange").getAsString();
-            System.out.println(price);
-
-            JsonArray selected_stock_data = Checking_individual_status("",exchange + ":" + stock_ticker);
-            System.out.println(selected_stock_data);
+            JsonArray selected_stock_data = Checking_individual_status("",stock_exchange + ":" + stock_ticker,"");
             JsonArray results = null;
+
             // Fetching market_cap sizes
-            for (double i = 0.1 ; i <= 1 ; i += 0.1) {
-                double selected_stock_marketcap = selected_stock_data.get(4).getAsDouble();
-                double dif = (selected_stock_marketcap * i);
-                String filters2 = """
+            long selected_stock_marketcap = selected_stock_data.get(4).getAsLong();
+            String filters = "";
+            for (double i = 0.1 ; i <= 100 ; i *= 2) {
+                long dif = (long) (selected_stock_marketcap * i);
+                long minCap = Math.max(0, selected_stock_marketcap - dif);
+                long maxCap = selected_stock_marketcap + dif;
+                filters = """
                 [
                 {
                 "left": "sector",
                 "operation": "equal",
-                "right": %s
+                "right": "%s"
                 },
 
                 {
                 "left": "industry",
                 "operation": "equal",
-                "right": %s
-                },
-
-                {
-                "left": "earnings_per_share_diluted_yoy_growth_ttm",
-                "operation": "greater",
-                "right": 0
+                "right": "%s"
                 },
 
                 {
@@ -122,34 +105,49 @@ public class App {
                 {
                 "left":"market_cap_basic",
                 "operation":"in_range",
-                "right":[%f,%f]
+                "right":[%d,%d]
                 }
                 ]
+                
                 """.formatted(
-                    selected_stock_data.get(0),
-                    selected_stock_data.get(1),
-                    selected_stock_marketcap - dif,
-                    selected_stock_marketcap + dif);
-                    
-                System.out.println(filters2);
-                results = Checking_individual_status(filters2, "");
+                    selected_stock_data.get(0).getAsString(),
+                    selected_stock_data.get(1).getAsString(),
+                    minCap,
+                    maxCap);
+                if (region_lock.equals("Y")) {
+                    results = Checking_individual_status(filters, "", selected_stock_data.get(5).getAsString());
+                }else{
+                    results = Checking_individual_status(filters, "","");
+                }
                 if (results.size() > 10) break;
+                Thread.sleep(300);
             }
-            System.out.println(results);
+
+            System.out.printf("%-15s %-15s %-15s %-15s%n", "Stock Ticker","Market", "Price", "P/E TTM");
+            for (JsonElement element : results) {
+                JsonObject object = element.getAsJsonObject();
+                JsonArray element_arr = object.get("d").getAsJsonArray();
+                if (element_arr.get(0).getAsString().equals(stock_ticker)) {
+                    System.out.printf("%-24s %-15s %-15.2f %-15.2f%n",GREEN + element_arr.get(0).getAsString() + RESET,element_arr.get(1).getAsString(),element_arr.get(2).getAsDouble(),element_arr.get(3).getAsDouble());
+                }else{
+                   System.out.printf("%-15s %-15s %-15.2f %-15.2f%n",element_arr.get(0).getAsString(),element_arr.get(1).getAsString(),element_arr.get(2).getAsDouble(),element_arr.get(3).getAsDouble());
+                }
+                
+            }
 
         } catch (Exception e) {
         }
     }
 
-    static JsonArray Checking_individual_status(String filters,String Special_filter) throws Exception{
-        String jsonBody;
+    static JsonArray Checking_individual_status(String filters,String Special_filter,String region) throws Exception{
+        String jsonBody = "";
         if (filters.equals("")) {
             jsonBody = """
         {
-          "filter": [],
           "symbols": { "tickers": [\"%s\"], "query": { "types": [] } },
-          "columns": ["sector", "industry","name","close","market_cap_basic"],
+          "columns": ["sector", "industry","name","close","market_cap_basic","market"],
           "sort": { "sortBy": "market_cap_basic", "sortOrder": "desc" },
+          "price_conversion" : {"to_currency": "usd"},
           "options": { "lang": "en" },
           "range": [0, 1]
         }
@@ -157,16 +155,33 @@ public class App {
 
         }
         else {
-            jsonBody = """
-        {
-          "filter": %s,
-          "symbols": { "tickers": [], "query": { "types": [] } },
-          "columns": ["name","close", "price_earnings_ttm","earnings_per_share_diluted_yoy_growth_ttm","earnings_per_share_diluted_ttm","price_sales_current","total_revenue_yoy_growth_ttm","gross_profit_ttm" ],
-          "sort": { "sortBy": "market_cap_basic", "sortOrder": "desc" },
-          "options": { "lang": "en" },
-          "range": [0, 100]
-        }
-        """.formatted(filters);
+            if (region.equals("")) {
+                jsonBody = """
+                    {
+                    "filter": %s,
+                    "symbols": { "tickers": [], "query": { "types": [] } },
+                    "columns": ["name", "market","close", "price_earnings_ttm","earnings_per_share_diluted_yoy_growth_ttm","earnings_per_share_diluted_ttm","price_sales_current","total_revenue_yoy_growth_ttm","gross_profit_ttm" ],
+                    "sort": { "sortBy": "market_cap_basic", "sortOrder": "desc" },
+                    "price_conversion" : {"to_currency": "usd"},
+                    "options": { "lang": "en" },
+                    "range": [0, 100]
+                    }
+                    """.formatted(filters);
+            }
+            else {
+                jsonBody = """
+                    {
+                    "filter": %s,
+                    "symbols": { "tickers": [], "query": { "types": [] } },
+                    "columns": ["name","market","close", "price_earnings_ttm","earnings_per_share_diluted_yoy_growth_ttm","earnings_per_share_diluted_ttm","price_sales_current","total_revenue_yoy_growth_ttm","gross_profit_ttm" ],
+                    "sort": { "sortBy": "market_cap_basic", "sortOrder": "desc" },
+                    "price_conversion" : {"to_currency": "usd"},
+                    "options": { "lang": "en" },
+                    "markets": ["%s"],
+                    "range": [0, 100]
+                    }
+                    """.formatted(filters,region);
+            }
         }
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create("https://scanner.tradingview.com/global/scan?label-product=screener-stock")).header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(jsonBody)).build();
         HttpClient client = HttpClient.newHttpClient();
@@ -175,7 +190,6 @@ public class App {
 
         for (int i = 0; i < 5; i++) { // Retry up to 5 times
             response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            System.out.println(response.body());
             if (response.statusCode() == 200 && !response.body().isEmpty()) {
                 json = JsonParser.parseString(response.body()).getAsJsonObject();
                 if (json.has("data")) break; // Success
