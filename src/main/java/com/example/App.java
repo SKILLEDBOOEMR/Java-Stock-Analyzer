@@ -4,9 +4,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.LinkedHashSet;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Scanner;
-import java.util.Set;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -78,10 +78,13 @@ public class App {
             // Fetching market_cap sizes
             long selected_stock_marketcap = selected_stock_data.get(4).getAsLong();
             String filters = "";
+            long minCap = 0;
+            long maxCap = 0;
+
             for (double i = 0.1 ; i <= 100 ; i *= 2) {
                 long dif = (long) (selected_stock_marketcap * i);
-                long minCap = Math.max(0, selected_stock_marketcap - dif);
-                long maxCap = selected_stock_marketcap + dif;
+                minCap = Math.max(0, selected_stock_marketcap - dif);
+                maxCap = selected_stock_marketcap + dif;
                 filters = """
                 [
                 {
@@ -119,21 +122,258 @@ public class App {
                 }else{
                     results = Checking_individual_status(filters, "","");
                 }
-                if (results.size() > 10) break;
-                Thread.sleep(300);
+                if (results.size() >= 11) {
+                    int selected_stock_location = 0;
+                    for (JsonElement element : results) {
+                        JsonObject object = element.getAsJsonObject();
+                        JsonArray element_arr = object.get("d").getAsJsonArray();
+                        if (safeGetString(element_arr, 0).equals(stock_ticker)) {
+                            selected_stock_location++;
+                            break;
+                        }
+                        selected_stock_location++;
+                    }
+                    int top_pos = selected_stock_location - 1;
+                    int bot_pos = selected_stock_location - 1;
+
+
+                    for (int s = 0 ; s <= results.size() / 2 ; s += 1) {
+                        if (top_pos + 1 > results.size() - 1) {
+                            bot_pos -= (5-s) * 2;
+                            break;
+                        }
+                        if (bot_pos - 1 < 0) {
+                            top_pos += (5-s) * 2;
+                            break;
+                        }
+                        top_pos++;
+                        bot_pos--;
+                    }
+                    System.out.println(bot_pos);
+                    System.out.println(  top_pos);
+                    JsonArray slice = new JsonArray();
+                    for (int b = bot_pos; b <= top_pos && b < results.size(); b++) {
+                        slice.add(results.get(b));
+                    }
+                    results = slice;
+                    break;
+                }
+                else{
+                    Thread.sleep(300);
+                }
             }
 
-            System.out.printf("%-15s %-15s %-15s %-15s%n", "Stock Ticker","Market", "Price", "P/E TTM");
+            System.out.printf("%-25s%n", YELLOW + "Filters Applied" + RESET);
+            System.out.printf("%-25s %-2s %-12s%n", "Sector", ":", selected_stock_data.get(0).getAsString());
+            System.out.printf("%-25s %-2s %-12s%n", "Industry", ":", selected_stock_data.get(1).getAsString());
+            System.out.printf("%-25s %-2s %-12s%n", "Market Cap Range", ":", shorten_num_to_readable(minCap) + "-" + shorten_num_to_readable(maxCap));
+            if (region_lock.equals("Y")) {
+                System.out.printf("%-25s %-2s %-12s%n", "Region", ":", selected_stock_data.get(5).getAsString());
+            }
+            System.out.println("");
+
+            // Print all results once after loop
+            System.out.println(YELLOW + "Relevant Data Fetched !" + RESET);
+            System.out.printf("%-12s %-12s %-12s %-12s %-12s %-12s %-12s %-12s %-12s %-20s %-20s %-20s%n","Ticker", "Region", "Price","Market Cap", "P/E TTM", "PEG TTM", "EV / EBIT", "EV / EBITDA", "P/S TTM", "Revenue Growth TTM", "EPS Growth TTM", "Stock Price Growth TTM");
+            JsonArray main_stock = null;
+            ArrayList<Double> arr_average_market_cap = new ArrayList<>();
+            ArrayList<Double> arr_average_peTtm = new ArrayList<>();
+            ArrayList<Double> arr_average_pegTtm = new ArrayList<>();
+            ArrayList<Double> arr_average_evebit = new ArrayList<>();
+            ArrayList<Double> arr_average_evebitda = new ArrayList<>();
+            ArrayList<Double> arr_average_psttm = new ArrayList<>();
+            ArrayList<Double> arr_average_rgrowthttm = new ArrayList<>();
+            ArrayList<Double> arr_average_eps_growth = new ArrayList<>();
+            ArrayList<Double> arr_average_stock_growth = new ArrayList<>();
+
             for (JsonElement element : results) {
                 JsonObject object = element.getAsJsonObject();
                 JsonArray element_arr = object.get("d").getAsJsonArray();
-                if (element_arr.get(0).getAsString().equals(stock_ticker)) {
-                    System.out.printf("%-24s %-15s %-15.2f %-15.2f%n",GREEN + element_arr.get(0).getAsString() + RESET,element_arr.get(1).getAsString(),element_arr.get(2).getAsDouble(),element_arr.get(3).getAsDouble());
-                }else{
-                   System.out.printf("%-15s %-15s %-15.2f %-15.2f%n",element_arr.get(0).getAsString(),element_arr.get(1).getAsString(),element_arr.get(2).getAsDouble(),element_arr.get(3).getAsDouble());
+
+                String ticker = safeGetString(element_arr, 0);
+                String market = safeGetString(element_arr, 1);
+                double price = safeGetDouble(element_arr, 2);
+                double market_cap = safeGetDouble(element_arr, 3);
+                arr_average_market_cap.add(market_cap);
+
+                double peTtm = safeGetDouble(element_arr, 4);
+                arr_average_peTtm.add(peTtm);
+
+                double pegTtm = safeGetDouble(element_arr, 5);
+                arr_average_pegTtm.add(pegTtm);
+
+                double evebit = safeGetDouble(element_arr, 6);
+                arr_average_evebit.add(evebit);
+
+                double evebitda = safeGetDouble(element_arr, 7);
+                arr_average_evebitda.add(evebitda);
+
+                double psttm = safeGetDouble(element_arr, 8);
+                arr_average_psttm.add(psttm);
+
+                double rgrowthttm = safeGetDouble(element_arr, 9);
+                arr_average_rgrowthttm.add(rgrowthttm);
+                String rgrowhttms = "";
+                if (rgrowthttm > 0) {
+                    rgrowhttms = GREEN + "+" + String.format("%.2f", rgrowthttm) + "%" + RESET;
+                }else {
+                    rgrowhttms = RED + String.format("%.2f", rgrowthttm) + "%" + RESET;
                 }
-                
+
+                double eps_growth = safeGetDouble(element_arr, 10);
+                arr_average_eps_growth.add(eps_growth);
+                String eps_growths = "";
+                if (eps_growth > 0) {
+                    eps_growths = GREEN + "+" + String.format("%.2f", eps_growth) + "%" + RESET;
+                }else {
+                    eps_growths = RED + String.format("%.2f", eps_growth) + "%" + RESET;
+                }
+
+                double stock_growth = safeGetDouble(element_arr, 11);
+                arr_average_stock_growth.add(stock_growth);
+                String stock_growths = "";
+                if (stock_growth > 0) {
+                    stock_growths = GREEN + "+" + String.format("%.2f", stock_growth) + "%" + RESET;
+                }else {
+                    stock_growths = RED + String.format("%.2f", stock_growth) + "%" + RESET;
+                }
+
+
+                if (ticker.equals(stock_ticker)) {
+                    System.out.printf("%-21s %-12s %-12.2f %-12s %-12.2f %-12.2f %-12.2f %-12.2f %-12.2f %-30s %-28s %-30s%n",
+                        GREEN + ticker + RESET,
+                        market,
+                        price,
+                        shorten_num_to_readable(market_cap),
+                        peTtm,
+                        pegTtm,
+                        evebit,
+                        evebitda,
+                        psttm,
+                        rgrowhttms,
+                        eps_growths,
+                        stock_growths
+
+                    );
+                    main_stock = element_arr;
+                } else {
+                    System.out.printf("%-12s %-12s %-12.2f %-12s %-12.2f %-12.2f %-12.2f %-12.2f %-12.2f %-30s %-28s %-30s%n",
+                        ticker,
+                        market,
+                        price,
+                        shorten_num_to_readable(market_cap),
+                        peTtm,
+                        pegTtm,
+                        evebit,
+                        evebitda,
+                        psttm,
+                        rgrowhttms,
+                        eps_growths,
+                        stock_growths
+                    );
+                }
             }
+            // Calculate  Average 
+            double average_market_cap = findmedian(arr_average_market_cap);
+            double average_peTtm = findmedian(arr_average_peTtm);
+            double average_pegTtm = findmedian(arr_average_pegTtm);
+            double average_evebit = findmedian(arr_average_evebit);
+            double average_evebitda = findmedian(arr_average_evebitda);
+            double average_psttm = findmedian(arr_average_psttm);
+            double average_rgrowthttm = findmedian(arr_average_rgrowthttm);
+            String average_rgrowthttms = "";
+                if (average_rgrowthttm > 0) {
+                    average_rgrowthttms = GREEN + "+" + String.format("%.2f", average_rgrowthttm) + "%" + RESET;
+                }else if (average_rgrowthttm < 0) {
+                    average_rgrowthttms = RED + String.format("%.2f", average_rgrowthttm) + "%" + RESET;
+                }
+
+            double average_eps_growth = findmedian(arr_average_eps_growth);
+            String average_eps_growths = "";
+                if (average_eps_growth > 0) {
+                    average_eps_growths = GREEN + "+" + String.format("%.2f", average_eps_growth) + "%" + RESET;
+                }else if (average_eps_growth < 0) {
+                    average_eps_growths = RED + String.format("%.2f", average_eps_growth) + "%" + RESET;
+                }
+            
+            double average_stock_growth = findmedian(arr_average_stock_growth);
+            String average_stock_growths = "";
+                if (average_stock_growth > 0) {
+                    average_stock_growths = GREEN + "+" + String.format("%.2f", average_stock_growth) + "%" + RESET;
+                }else if (average_stock_growth < 0) {
+                    average_stock_growths = RED + String.format("%.2f", average_stock_growth) + "%" + RESET;
+                }
+
+
+            System.out.println("");
+            System.out.println(YELLOW + "Calculated Average (Method : Median & IQR)" + RESET);
+            System.out.printf("%-12s %-12s %-12s %-12s %-12s %-12s %-12s %-12s %-12s %-20s %-20s %-20s%n","Ticker", "Region", "Price","Market Cap", "P/E TTM", "PEG TTM", "EV / EBIT", "EV / EBITDA", "P/S TTM", "Revenue Growth TTM", "EPS Growth TTM", "Stock Price Growth TTM");
+                        
+            String mainstock_rgrowthttms = "";
+                if (safeGetDouble(main_stock, 9) > 0) {
+                    mainstock_rgrowthttms = GREEN + "+" + String.format("%.2f", safeGetDouble(main_stock, 9)) + "%" + RESET;
+                }else if (safeGetDouble(main_stock, 9) < 0) {
+                    mainstock_rgrowthttms = RED + String.format("%.2f", safeGetDouble(main_stock, 9)) + "%" + RESET;
+                }
+
+            String mainstock_eps_growths = "";
+                if (safeGetDouble(main_stock, 10) > 0) {
+                    mainstock_eps_growths = GREEN + "+" + String.format("%.2f", safeGetDouble(main_stock, 10)) + "%" + RESET;
+                }else if (safeGetDouble(main_stock, 10) < 0) {
+                    mainstock_eps_growths = RED + String.format("%.2f", safeGetDouble(main_stock, 10)) + "%" + RESET;
+                }
+            
+            String mainstock_stock_growths = "";
+                if (safeGetDouble(main_stock, 11) > 0) {
+                    mainstock_stock_growths = GREEN + "+" + String.format("%.2f", safeGetDouble(main_stock, 11)) + "%" + RESET;
+                }else if (safeGetDouble(main_stock, 11) < 0) {
+                    mainstock_stock_growths = RED + String.format("%.2f", safeGetDouble(main_stock, 11)) + "%" + RESET;
+                }
+            
+            System.out.printf("%-12s %-12s %-12.2f %-12s %-12.2f %-12.2f %-12.2f %-12.2f %-12.2f %-30s %-28s %-30s%n",
+                        safeGetString(main_stock, 0),
+                        safeGetString(main_stock, 1),
+                        safeGetDouble(main_stock, 2),
+                        shorten_num_to_readable(safeGetDouble(main_stock, 3)),
+                        safeGetDouble(main_stock, 4),
+                        safeGetDouble(main_stock, 5),
+                        safeGetDouble(main_stock, 6),
+                        safeGetDouble(main_stock, 7),
+                        safeGetDouble(main_stock, 8),
+                        mainstock_rgrowthttms,
+                        mainstock_eps_growths,
+                        mainstock_stock_growths
+                    );
+                    
+            System.out.printf("%-12s %-12s %-12s %-12s %-12.2f %-12.2f %-12.2f %-12.2f %-12.2f %-30s %-28s %-30s%n",
+                        "Average",
+                        "-",
+                        "-",
+                        shorten_num_to_readable(average_market_cap),
+                        average_peTtm,
+                        average_pegTtm,
+                        average_evebit,
+                        average_evebitda,
+                        average_psttm,
+                        average_rgrowthttms,
+                        average_eps_growths,
+                        average_stock_growths
+                    );
+            System.out.println("-".repeat(180));
+            System.out.printf("%-12s %-12s %-12s %-12s %-12s %-12s %-12s %-12s %-12s %-20s %-20s %-20s%n",
+                        stock_ticker + " / Average",
+                        "-",
+                        "-",
+                       String.format("%.2f",(safeGetDouble(main_stock, 3) / average_market_cap ) * 100) + "%",
+                       String.format("%.2f",(safeGetDouble(main_stock, 4) / average_peTtm ) * 100) + "%",
+                       String.format("%.2f",(safeGetDouble(main_stock, 5) / average_pegTtm ) * 100) + "%",
+                       String.format("%.2f",(safeGetDouble(main_stock, 6) / average_evebit ) * 100 ) + "%",
+                       String.format("%.2f",(safeGetDouble(main_stock, 7) / average_evebitda ) * 100 ) + "%",
+                       String.format("%.2f",(safeGetDouble(main_stock, 8) / average_psttm ) * 100 ) + "%",
+                       String.format("%.2f",(safeGetDouble(main_stock, 9) / average_rgrowthttm ) * 100 ) + "%",
+                       String.format("%.2f",(safeGetDouble(main_stock, 10) / average_eps_growth ) * 100 ) + "%",
+                       String.format("%.2f",(safeGetDouble(main_stock, 11) / average_stock_growth ) * 100 ) + "%"
+            );
 
         } catch (Exception e) {
         }
@@ -160,7 +400,7 @@ public class App {
                     {
                     "filter": %s,
                     "symbols": { "tickers": [], "query": { "types": [] } },
-                    "columns": ["name", "market","close", "price_earnings_ttm","earnings_per_share_diluted_yoy_growth_ttm","earnings_per_share_diluted_ttm","price_sales_current","total_revenue_yoy_growth_ttm","gross_profit_ttm" ],
+                    "columns": ["name", "market","close", "market_cap_basic", "price_earnings_ttm","price_earnings_growth_ttm","enterprise_value_to_ebit_ttm","enterprise_value_ebitda_ttm","price_sales_current","total_revenue_yoy_growth_ttm", "earnings_per_share_diluted_yoy_growth_ttm", "Perf.Y"],
                     "sort": { "sortBy": "market_cap_basic", "sortOrder": "desc" },
                     "price_conversion" : {"to_currency": "usd"},
                     "options": { "lang": "en" },
@@ -173,7 +413,7 @@ public class App {
                     {
                     "filter": %s,
                     "symbols": { "tickers": [], "query": { "types": [] } },
-                    "columns": ["name","market","close", "price_earnings_ttm","earnings_per_share_diluted_yoy_growth_ttm","earnings_per_share_diluted_ttm","price_sales_current","total_revenue_yoy_growth_ttm","gross_profit_ttm" ],
+                    "columns": ["name","market","close", "market_cap_basic", "price_earnings_ttm","price_earnings_growth_ttm","enterprise_value_to_ebit_ttm","enterprise_value_ebitda_ttm","price_sales_current","total_revenue_yoy_growth_ttm","earnings_per_share_diluted_yoy_growth_ttm", "Perf.Y" ],
                     "sort": { "sortBy": "market_cap_basic", "sortOrder": "desc" },
                     "price_conversion" : {"to_currency": "usd"},
                     "options": { "lang": "en" },
@@ -212,29 +452,47 @@ public class App {
         }
         return data;
     }
-
-    static Set<String> convert_stocks_to_10(JsonArray listofstock) throws Exception {
-        System.out.println(listofstock);
-        Set<String> uniqueTickers = new LinkedHashSet<>();
-
-        for (JsonElement element : listofstock) {
-            System.out.println(element);
-            JsonObject object = element.getAsJsonObject();
-            JsonArray array = object.get("d").getAsJsonArray();
-
-            if (array.size() > 0) {
-                String ticker = array.get(0).getAsString();
-
-                if (ticker.matches("^[A-Z]+$")) {
-                        uniqueTickers.add(ticker);
-                        System.out.println(array);
-                }
-            }
+    private static String safeGetString(JsonArray array, int index) {
+        return (array.size() > index && !array.get(index).isJsonNull()) ? array.get(index).getAsString() : "";
+    }
+    private static double safeGetDouble(JsonArray array, int index) {
+        return (array.size() > index && !array.get(index).isJsonNull()) ? array.get(index).getAsDouble() : 0.0;
+    }
+    private static String shorten_num_to_readable(double number) {
+        if (number > 1_000_000_000_000L) {
+            return String.format("%.2f",(double) number / 1_000_000_000_000L) + "T";
+        } else if (number > 1_000_000_000L) {
+            return String.format("%.2f",(double) number / 1_000_000_000L) + "B";
+        } else if (number > 1_000_000L) {
+            return String.format("%.2f",(double) number / 1_000_000L) + "M";
+        } else if (number > 1_000_000L) {
+            return String.format("%.2f",(double) number / 1_000L) + "K";
         }
 
-        System.out.println(uniqueTickers);
-        return uniqueTickers;
+        return String.valueOf(number);
     }
+    private static double findmedian(ArrayList<Double> values) {
+        double[] valuez = values.stream().mapToDouble(Double::doubleValue).toArray();
+        Arrays.sort(valuez);
+        int n = valuez.length;
 
+        double q1 = valuez[n / 4];
+        double q3 = valuez[(3 * n) / 4];
+        double iqr = q3 - q1;
+
+        double lowerBound = q1 - 1.5 * iqr;
+        double upperBound = q3 + 1.5 * iqr;
+
+        double sum = 0.0;
+        int count = 0;
+        for (double v : valuez) {
+            if (v >= lowerBound && v <= upperBound) {
+                sum += v;
+                count++;
+            }
+        }
+        return (count == 0) ? Double.NaN : sum / count;
+    }
+    
 }
 
